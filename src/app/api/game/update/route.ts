@@ -1,15 +1,24 @@
-import { readFile, writeFile } from "fs/promises";
+import { Redis } from "@upstash/redis";
 import { NextResponse } from "next/server";
 import { CurrentGame, GameState, Move } from "@/types/types";
 
-const DB_PATH = "src/db/game.json";
+interface GameData {
+  currentGame: CurrentGame | null;
+}
+
+const redis = new Redis({
+  url: process.env.UPSTASH_REDIS_REST_URL!,
+  token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+});
 
 export async function POST(req: Request) {
   try {
     const updates = await req.json();
 
-    const currentData = await readFile(DB_PATH, "utf-8");
-    const gameData = JSON.parse(currentData);
+    // Get current game from Redis
+    const gameData = (await redis.get<GameData>("currentGame")) || {
+      currentGame: null,
+    };
 
     const updatedGame: CurrentGame = {
       ...gameData.currentGame,
@@ -17,6 +26,7 @@ export async function POST(req: Request) {
       lastAction: Date.now(),
     };
 
+    // Validation checks stay the same
     if (
       updates.gameState &&
       !Object.values(GameState).includes(updates.gameState)
@@ -37,16 +47,10 @@ export async function POST(req: Request) {
       );
     }
 
-    await writeFile(
-      DB_PATH,
-      JSON.stringify(
-        {
-          currentGame: updatedGame,
-        },
-        null,
-        2
-      )
-    );
+    // Save to Redis instead of file
+    await redis.set("currentGame", {
+      currentGame: updatedGame,
+    });
 
     return NextResponse.json({
       success: true,
